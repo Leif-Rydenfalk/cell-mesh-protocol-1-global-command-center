@@ -1,0 +1,4 @@
+id = "global-command-center"
+command = "bun install && bun run index.ts"
+critical = false
+scalable = false

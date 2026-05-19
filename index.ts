@@ -494,11 +494,14 @@ const UI_HTML = `<!DOCTYPE html>
 
             <!-- Deploy Panel -->
             <div class="card" id="deploy-panel" style="display: none;">
-                <h3 style="font-size: 14px; margin-bottom: 12px;">Deploy New Node</h3>
-                <input type="text" id="deploy-name" class="input" placeholder="node-name" style="margin-bottom: 8px;">
-                <input type="text" id="deploy-repo" class="input" placeholder="https://github.com/user/repo.git" style="margin-bottom: 8px;">
-                <input type="text" id="deploy-type" class="input" placeholder="cax11" value="cax11" style="margin-bottom: 8px;">
-                <button class="btn" onclick="deployNode()" id="deploy-btn">DEPLOY TO HETZNER</button>
+                <h3 style="font-size: 14px; margin-bottom: 12px;">Deploy New Cell to Hetzner</h3>
+                <input type="text" id="deploy-cell-name" class="input" placeholder="cell name (e.g. starter)" style="margin-bottom: 8px;">
+                <input type="text" id="deploy-cell-repo" class="input" placeholder="https://github.com/user/cell-repo.git" style="margin-bottom: 8px;">
+                <input type="number" id="deploy-cell-port" class="input" placeholder="cell port" value="5101" min="1024" max="65535" style="margin-bottom: 8px;">
+                <input type="text" id="deploy-lighthouse" class="input" placeholder="lighthouse addr" value="http://178.105.145.170:5100" style="margin-bottom: 8px;">
+                <input type="text" id="deploy-server-type" class="input" placeholder="server type (cax11/cx22)" value="cax11" style="margin-bottom: 8px;">
+                <input type="text" id="deploy-location" class="input" placeholder="location (fsn1/nbg1/hel1/ash/hil)" value="fsn1" style="margin-bottom: 8px;">
+                <button class="btn" onclick="deployNode()" id="deploy-btn">DEPLOY CELL</button>
             </div>
 
             <!-- Node List -->
@@ -670,29 +673,56 @@ const UI_HTML = `<!DOCTYPE html>
         }
 
         async function deployNode() {
-            const name = document.getElementById('deploy-name').value;
-            const repo = document.getElementById('deploy-repo').value;
-            const type = document.getElementById('deploy-type').value;
+            const cellName = document.getElementById('deploy-cell-name').value.trim();
+            const cellRepoUrl = document.getElementById('deploy-cell-repo').value.trim();
+            const cellPort = parseInt(document.getElementById('deploy-cell-port').value, 10) || 5101;
+            const lighthouseAddr = document.getElementById('deploy-lighthouse').value.trim();
+            const serverType = document.getElementById('deploy-server-type').value.trim() || 'cax11';
+            const location = document.getElementById('deploy-location').value.trim() || 'fsn1';
 
-            if (!name || !repo) return showToast('Fill all fields');
+            if (!cellName || !cellRepoUrl) return showToast('Cell name and repo URL are required');
 
             const btn = document.getElementById('deploy-btn');
             btn.disabled = true;
-            btn.textContent = 'DEPLOYING...';
+            btn.textContent = 'PROVISIONING FW...';
 
             try {
+                // Step 1: get or create the shared firewall, returning its real id.
+                const fw = await api('mesh/call', {
+                    token,
+                    capability: 'igniter/setupFirewall',
+                    args: { token: HETZNER_TOKEN }
+                });
+                if (!fw || typeof fw.id !== 'number') {
+                    throw new Error('Firewall setup failed: ' + JSON.stringify(fw));
+                }
+
+                btn.textContent = 'DEPLOYING CELL...';
+
+                // Step 2: provision the server using the new createServer signature.
+                const createArgs = {
+                    token: HETZNER_TOKEN,
+                    cellRepoUrl,
+                    cellName,
+                    cellPort,
+                    serverType,
+                    location,
+                    firewallId: fw.id,
+                };
+                if (lighthouseAddr) createArgs.lighthouseAddr = lighthouseAddr;
+
                 const result = await api('mesh/call', {
                     token,
                     capability: 'igniter/createServer',
-                    args: { token: HETZNER_TOKEN, repoUrl: repo, repoBranch: 'main', serverType: type, location: 'fsn1', firewallId: 0 }
+                    args: createArgs
                 });
-                showToast(result.ip ? \`Deployed: \${result.ip}\` : 'Deploy failed');
+                showToast(result.ip ? \`Deployed: \${result.addr || result.ip + ':' + cellPort}\` : ('Deploy failed: ' + JSON.stringify(result)));
             } catch (e) {
                 showToast('Error: ' + e.message);
             }
 
             btn.disabled = false;
-            btn.textContent = 'DEPLOY TO HETZNER';
+            btn.textContent = 'DEPLOY CELL';
         }
 
         // FILES
